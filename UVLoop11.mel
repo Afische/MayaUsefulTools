@@ -13,8 +13,8 @@ text -label "";
 text -label "SELECT MASK(S) BEFORE CLICKING DA BUTTONS :)";
 text -label "";
 
-frameLayout -label "DETECT LOOPS" -cll 1 -cl 1 -bgc 0.1 0.1 0.1;
-text -label "Print names of geo with hidden loops somewhere";
+frameLayout -label "DETECT LOOPS" -cll 1 -cl 1 -bgc 0.10 0.30 1.0 -bv 1;
+text -label "Print names of geo with loops";
 button -label "Search" -c "detectLoops";
 setParent ..;
 
@@ -25,9 +25,9 @@ button -label "Search" -c "findLoops";
 setParent $layout1;
 
 text -label "";
-frameLayout -label "SELECT UV SEAMS" -cll 1 -cl 1 -bgc 0.1 0.1 0.1;
-text -label "Select all UV seams to detect unwanted ones";
-button -label "Search" -c "detectSeams";
+frameLayout -label "CLOSE HOLES" -cll 1 -cl 1 -bgc 0.1 0.1 0.1;
+text -label "Close all (triangular) holes in the mask besides the back of the mask";
+button -label "Close" -c "closeHoles";
 setParent $layout1;
 
 text -label "";
@@ -37,13 +37,19 @@ button -label "Delete" -c "floatingGeo";
 setParent $layout1;
 
 text -label "";
-frameLayout -label "CLOSE HOLES" -cll 1 -cl 1 -bgc 0.1 0.1 0.1;
-text -label "Close all holes in the mask besides the back of the mask";
-button -label "Close" -c "closeHoles";
+frameLayout -label "BATCH CLOSE HOLES, DELETE FLOATING GEO, FIND LOOPS" -cll 1 -cl 1 -bgc 0.1 0.1 0.1;
+text -label "Batch clean geo and create duplicate geometry of only loops";
+button -label "Search" -c "batch";
 setParent $layout1;
 
 text -label "";
-frameLayout -label "CREATE UV" -cll 1 -cl 1 -bgc 0.1 0.1 0.1;
+frameLayout -label "SELECT UV SEAMS" -cll 1 -cl 1 -bgc 0.10 0.30 1.0 -bv 1;
+text -label "Select all UV seams (one mask at a time)";
+button -label "Search" -c "detectSeams";
+setParent $layout1;
+
+text -label "";
+frameLayout -label "CREATE UV" -cll 1 -cl 1 -bgc 0.28 0.55 0.30 -bv 1;
 text -label "Create UV for mask (WARNING: do not perform on mask with loop)";
 button -label "Create" -c "makeUV";
 setParent $layout1;
@@ -97,21 +103,23 @@ global proc detectLoops(){
 }
 
 global proc findLoops(){
-    string $selList[] = `ls -sl -fl`;
+    string $selList[] = `ls -sl`;
+    print($selList);
     if (size($selList) > 0){
         for ($obj in $selList) {
             polyCleanupArgList 3 { "1","1","1","0","0","0","0","0","0","1e-005","0","1e-005","0","1e-005","0","1","0" };
-            duplicate -n "original" $obj;
+            select $obj;
+            duplicate -n $obj;
             print ("Creating UV for: " + $obj + "\n");
             polyProjection -type Spherical -md p -uvs "map1" ($obj + ".f[*]");
             unfold -i 5000 -ss 0.001 -gb 0 -gmb 0.5 -pub 1 -ps  0 -oa  0 -us off $obj;
             u3dLayout -res 256 -scl 1 -mar 0.01 -box 0 1 0 1 $obj;
-            DeleteHistory;
             select $obj;
-            selectType -alc 0 -fc 1;
-            select $obj;
+            select -r $obj.map["*"];
+            ConvertSelectionToUVs;
             hilite $obj;
             selectUVFaceOrientationComponents {} 0 2 1;
+            ConvertSelectionToFaces;
             string $loopList[] = `ls -sl`;
             select $obj;
             select $loopList;
@@ -154,7 +162,7 @@ global proc floatingGeo(){
                 select -r $obj.map["*"];
                 ConvertSelectionToUVShell;
                 $shellUVs = `ls -sl`;
-                $findShells = `texGetShells`;
+                string $findShells[] = `texGetShells`;
                 $numShells = `size $findShells`;
                 $shellIndex = 0;
                 for ($item = 0; $item < $numShells; ++$item){
@@ -218,6 +226,113 @@ global proc closeHoles(){
         print "\nNo mesh selected dood\n";
     }
     select $selList;
+}
+
+global proc batch(){
+
+    //DELETE FLOATING GEO
+    string $selList[] = `ls -sl -fl`;
+    if (size($selList) > 0){
+        for ($obj in $selList) {
+            polyProjection -t "spherical" -md p -uvs "map1" ($obj + ".f[*]");
+            $biggest = 0;
+            string $badGeoList[];
+            for ($counter = 0; $counter < 2; ++$counter){
+                polyProjection -t "spherical" -md p -uvs "map1" ($obj + ".f[*]");
+                select $obj;
+                select -r $obj.map["*"];
+                ConvertSelectionToUVShell;
+                $shellUVs = `ls -sl`;
+                string $findShells[] = `texGetShells`;
+                $numShells = `size $findShells`;
+                $shellIndex = 0;
+                for ($item = 0; $item < $numShells; ++$item){
+                    select $shellUVs;
+                    $findShells = `texGetShells`;
+                    tokenize($findShells[$shellIndex], $findShells);
+                    select $findShells;
+                    ConvertSelectionToFaces;
+                    $currentSize = `polyEvaluate -faceComponent`;
+                    $shellIndex = $shellIndex + 1;
+                    if ($currentSize[0] > $biggest){
+                        $biggest = $currentSize[0];
+                    }
+                    if ($counter > 0){
+                        if ($currentSize[0] < $biggest){
+                            print("deleted\n");
+                            ConvertSelectionToFaces;
+                            string $badGeo[] = `ls -sl -fl`;
+                            for($face in $badGeo){
+                                $badGeoList[size($badGeoList)] = $face;
+                            }
+                            ConvertSelectionToUVShell;
+                        }
+                    }
+                }          
+            }
+            select $badGeoList;
+            delete;
+        }
+        print "\ndeleted floating geo!\n";
+    }
+    else {
+        print "\nNo mesh selected dood\n";
+    }
+    select $selList;
+
+    //CLOSE HOLES
+    string $selList2[] = `ls -sl -fl`;
+    if (size($selList2) > 0){
+        for ($obj in $selList2) {
+            select $obj;
+            select -r $obj.map["*"];
+            polySelectBorderShell 1;
+            ConvertSelectionToFaces;
+            $borders = `ls -sl`;
+            polyCloseBorder;
+            select $borders;
+            GrowPolygonSelectionRegion;
+            $newBorders = `ls -sl`;
+            polySelectConstraint -m 2 -t 8 -sz 3;
+            select $newBorders;
+            polySelectConstraint -m 2 -t 8 -sz 3;
+            polySelectConstraint -m 0;
+            delete;
+        }
+        print "\nclosed holes!\n";
+    }
+    else {
+        print "\nNo mesh selected dood\n";
+    }
+    select $selList2;
+    
+    //FIND LOOPS
+    string $selList3[] = `ls -sl -fl`;
+    if (size($selList3) > 0){
+        for ($obj in $selList) {
+            polyCleanupArgList 3 { "1","1","1","0","0","0","0","0","0","1e-005","0","1e-005","0","1e-005","0","1","0" };
+            select $obj;
+            duplicate -n $obj;
+            print ("Creating UV for: " + $obj + "\n");
+            polyProjection -type Spherical -md p -uvs "map1" ($obj + ".f[*]");
+            unfold -i 5000 -ss 0.001 -gb 0 -gmb 0.5 -pub 1 -ps  0 -oa  0 -us off $obj;
+            u3dLayout -res 256 -scl 1 -mar 0.01 -box 0 1 0 1 $obj;
+            select $obj;
+            select -r $obj.map["*"];
+            ConvertSelectionToUVs;
+            hilite $obj;
+            selectUVFaceOrientationComponents {} 0 2 1;
+            ConvertSelectionToFaces;
+            string $loopList[] = `ls -sl`;
+            select $obj;
+            select $loopList;
+            invertSelection;
+            delete;
+        }
+    }
+    else {
+        print "\nNo mesh selected dood\n";
+    }
 }
 
 global proc makeUV(){
